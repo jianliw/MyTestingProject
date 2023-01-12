@@ -1,0 +1,202 @@
+_schema-version: '3.1'
+ID: MyTestingProject
+version: 1.0.0
+description: A simple CAP project.
+parameters:
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - rm -rf build/ui-deployer
+        - mkdir -p build/ui-deployer
+        - rm -rf build/dist
+        - mkdir -p build/dist
+    - builder: custom
+      commands:
+        - npm install --production
+        - >-
+          bash -c "cds -v | grep 'cds-dk' || npm i --production --no-save
+          @sap/cds-dk @sap/mdk-tools"
+        - bash -c "export PATH=$PATH:$(pwd)/node_modules/.bin"
+        - cds build --production
+modules:
+  - name: MyTestingProject-MyTestingProject.MyApplication
+    type: html5
+    path: app/MyTestingProject.MyApplication
+    build-parameters:
+      builder: custom
+      commands:
+        - rm -rf dist-zip dist
+        - >-
+          npx -p @ui5/cli ui5 build --dest dist
+          --include-task=generateManifestBundle
+          --include-task=generateCachebusterInfo
+        - mkdir dist-zip
+        - >-
+          bash -c "cd dist && npx bestzip
+          ../dist-zip/MyTestingProject.MyApplication.zip *"
+      _artifactName: MyTestingProject.MyApplication.zip
+      supported-platforms: []
+      build-result: dist-zip
+  - name: MyTestingProject-db-deployer
+    type: hdb
+    path: gen/db
+    parameters:
+      buildpack: nodejs_buildpack
+    build-parameters:
+      builder: npm
+      ignore:
+        - node_modules
+        - package-lock.json
+    requires:
+      - name: MyTestingProject-service-uaa
+      - name: MyTestingProject-service-db
+  - name: MyTestingProject-srv
+    type: nodejs
+    path: gen/srv
+    parameters:
+      memory: 256MB
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+    build-parameters:
+      builder: npm
+      ignore:
+        - node_modules
+        - package-lock.json
+    requires:
+      - name: MyTestingProject-service-uaa
+      - name: MyTestingProject-service-db
+      - name: MyTestingProject-service-destination
+      - name: MyTestingProject-service-metadata
+      - name: MyTestingProject-service-connectivity
+      - name: MyTestingProject-service-logs
+  - name: MyTestingProject-aux-destinations
+    type: com.sap.application.content
+    parameters:
+      content:
+        subaccount:
+          existing_destinations_policy: update
+          destinations:
+            - Authentication: OAuth2UserTokenExchange
+              Name: MyTestingProject-service-uaa
+              ServiceInstanceName: MyTestingProject-uaa
+              ServiceKeyName: MyTestingProject-uaa-key
+              sap.cloud.service: lcap.MyTestingProject
+            - Authentication: OAuth2UserTokenExchange
+              Name: MyTestingProject-app-srv
+              TokenServiceInstanceName: MyTestingProject-uaa
+              TokenServiceKeyName: MyTestingProject-uaa-key
+              URL: ~{srv-api/srv-url}
+              sap.cloud.service: lcap.MyTestingProject
+            - Name: MyTestingProject-service-html5-apps-repo-host
+              ServiceInstanceName: MyTestingProject-html5-apps-repo-host
+              ServiceKeyName: MyTestingProject-html5-apps-repo-host-key
+              sap.cloud.service: lcap.MyTestingProject
+    build-parameters:
+      no-source: true
+    requires:
+      - name: MyTestingProject-service-uaa
+        parameters:
+          service-key:
+            name: MyTestingProject-uaa-key
+      - name: srv-api
+      - name: MyTestingProject-service-html5-apps-repo-host
+        parameters:
+          service-key:
+            name: MyTestingProject-html5-apps-repo-host-key
+      - name: MyTestingProject-service-destination
+        parameters:
+          content-target: true
+  - name: MyTestingProject-launchpad
+    type: html5
+    path: build/launchpad
+    build-parameters:
+      builder: custom
+      commands:
+        - npm install
+        - >-
+          npx -p @ui5/cli ui5 build --dest dist
+          --include-task=generateManifestBundle
+          --include-task=generateCachebusterInfo
+        - bash -c "cd dist && npx bestzip ../../../build/dist/launchpad.zip *"
+        - rm -rf dist
+      _artifactName: launchpad.zip
+      supported-platforms: []
+      build-result: ../../build/dist
+  - name: MyTestingProject-aux-ui-deployer
+    type: com.sap.application.content
+    path: build/ui-deployer
+    build-parameters:
+      build-result: resources
+      requires:
+        - name: MyTestingProject-MyTestingProject.MyApplication
+          artifacts:
+            - MyTestingProject.MyApplication.zip
+          target-path: resources
+        - name: MyTestingProject-launchpad
+          artifacts:
+            - launchpad.zip
+          target-path: resources
+    requires:
+      - name: MyTestingProject-service-html5-apps-repo-host
+        parameters:
+          content-target: true
+resources:
+  - type: org.cloudfoundry.managed-service
+    name: MyTestingProject-service-uaa
+    parameters:
+      service: xsuaa
+      service-plan: application
+      service-name: MyTestingProject-uaa
+      path: xs-security.json
+      config:
+        xsappname: MyTestingProject-${space}
+        role-collections:
+          - description: PersonalDataManager
+            name: MyTestingProject-PersonalDataManager-${space}
+            role-template-references:
+              - $XSAPPNAME.PersonalDataManager
+  - type: org.cloudfoundry.managed-service
+    name: MyTestingProject-service-db
+    parameters:
+      service: hana
+      service-plan: hdi-shared
+      service-name: MyTestingProject-db
+  - type: org.cloudfoundry.managed-service
+    name: MyTestingProject-service-destination
+    parameters:
+      service: destination
+      service-plan: lite
+      service-name: MyTestingProject-destination
+      config:
+        HTML5Runtime_enabled: true
+        version: 1.0.0
+  - type: org.cloudfoundry.user-provided-service
+    name: MyTestingProject-service-metadata
+    parameters:
+      service: metadata
+      service-plan: standard
+      service-name: MyTestingProject-metadata
+      config:
+        default-domain: ${default-domain}
+  - type: org.cloudfoundry.managed-service
+    name: MyTestingProject-service-connectivity
+    parameters:
+      service: connectivity
+      service-plan: lite
+      service-name: MyTestingProject-connectivity
+  - type: org.cloudfoundry.managed-service
+    name: MyTestingProject-service-logs
+    parameters:
+      service: application-logs
+      service-plan: lite
+      service-name: MyTestingProject-logs
+  - type: org.cloudfoundry.managed-service
+    name: MyTestingProject-service-html5-apps-repo-host
+    parameters:
+      service: html5-apps-repo
+      service-plan: app-host
+      service-name: MyTestingProject-html5-apps-repo-host

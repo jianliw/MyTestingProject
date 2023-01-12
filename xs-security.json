@@ -1,0 +1,21 @@
+{
+  "scopes": [
+    {
+      "name": "$XSAPPNAME.PersonalDataManager",
+      "description": "PersonalDataManager"
+    }
+  ],
+  "attributes": [],
+  "role-templates": [
+    {
+      "name": "PersonalDataManager",
+      "description": "generated",
+      "scope-references": [
+        "$XSAPPNAME.PersonalDataManager"
+      ],
+      "attribute-references": []
+    }
+  ],
+  "xsappname": "MyTestingProject",
+  "tenant-mode": "dedicated"
+}
